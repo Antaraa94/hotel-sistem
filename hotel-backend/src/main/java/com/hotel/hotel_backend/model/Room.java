@@ -3,8 +3,6 @@ package com.hotel.hotel_backend.model;
 import jakarta.persistence.*;
 import lombok.*;
 
-import java.math.BigDecimal;
-
 @Entity
 @Table(name = "rooms")
 @Getter
@@ -18,14 +16,12 @@ public class Room {
     private Long id;
 
     @Column(nullable = false, unique = true)
-    private String roomNumber;
+    private String roomNumber; // npr. 101, 102
+
+    @ManyToOne(optional = false)
+    @JoinColumn(name = "room_type_id", nullable = false)
+    private RoomType roomType;
 
     @Column(nullable = false)
-    private String type; // npr. SINGLE, DOUBLE, SUITE
-
-    @Column(nullable = false)
-    private BigDecimal pricePerNight;
-
-    @Column(nullable = false)
-    private String status; // AVAILABLE, OCCUPIED, CLEANING
+    private String status; // AVAILABLE, OCCUPIED, CLEANING, MAINTENANCE
 }

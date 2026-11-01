@@ -1,240 +1,327 @@
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
-import Link from 'next/link';
+import { useState } from "react";
+import Link from "next/link";
 
-interface Room {
+interface RoomType {
   id: number;
-  roomNumber: string;
-  type: string;
-  pricePerNight: number;
-  status: string;
+  name: string;
+  capacity: number;
+  basePrice: number;
 }
 
-export default function Home() {
-  const [todayStr, setTodayStr] = useState('');
-  const [rooms, setRooms] = useState<Room[]>([]);
-  const [selectedRoom, setSelectedRoom] = useState<Room | null>(null);
-  const [formData, setFormData] = useState({
-    firstName: '',
-    lastName: '',
-    email: '',
-    phoneNumber: '',
-    checkInDate: '',
-    checkOutDate: '',
-  });
-  const [message, setMessage] = useState<{ text: string; isError: boolean } | null>(null);
+interface HotelPackage {
+  id: number;
+  name: string;
+  extraPricePerNight: number;
+}
 
-  // Dohvaćanje soba i postavljanje današnjeg datuma tek na klijentu
-  const fetchRooms = async () => {
+interface AvailabilityData {
+  availableRoomTypes: RoomType[];
+  availablePackages: HotelPackage[];
+}
+
+export default function HomePage() {
+  const [checkInDate, setCheckInDate] = useState("");
+  const [checkOutDate, setCheckOutDate] = useState("");
+  const [availability, setAvailability] = useState<AvailabilityData | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Odabir sobe i paketa za rezervaciju
+  const [selectedRoomType, setSelectedRoomType] = useState<RoomType | null>(null);
+  const [selectedPackage, setSelectedPackage] = useState<HotelPackage | null>(null);
+
+  // Podaci gosta
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [email, setEmail] = useState("");
+  const [phoneNumber, setPhoneNumber] = useState("");
+  const [bookingSuccess, setBookingSuccess] = useState(false);
+
+  const API_BASE = "https://hotel-backend-hita.onrender.com/api";
+
+  const handleSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!checkInDate || !checkOutDate) {
+      setError("Molimo unesite oba datuma.");
+      return;
+    }
+    if (checkInDate >= checkOutDate) {
+      setError("Datum odlaska mora biti nakon datuma dolaska.");
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setSelectedRoomType(null);
+    setSelectedPackage(null);
+    setBookingSuccess(false);
+
     try {
-      const res = await fetch('http://localhost:8080/api/rooms');
-      if (res.ok) {
-        const data = await res.json();
-        setRooms(data);
+      const res = await fetch(
+        `${API_BASE}/reservations/availability?checkIn=${checkInDate}&checkOut=${checkOutDate}`
+      );
+      if (!res.ok) throw new Error("Greška pri dohvatu dostupnosti.");
+      const data: AvailabilityData = await res.json();
+      setAvailability(data);
+      if (data.availablePackages.length > 0) {
+        setSelectedPackage(data.availablePackages[0]);
       }
-    } catch (err) {
-      console.error('Greška pri dohvatu soba:', err);
+    } catch (err: any) {
+      setError(err.message || "Nešto je pošlo po zlu.");
+    } finally {
+      setLoading(false);
     }
   };
 
-  useEffect(() => {
-    setTodayStr(new Date().toISOString().split('T')[0]);
-    fetchRooms();
-  }, []);
+  const calculateTotal = () => {
+    if (!selectedRoomType || !selectedPackage || !checkInDate || !checkOutDate) return 0;
+    const start = new Date(checkInDate);
+    const end = new Date(checkOutDate);
+    const nights = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)));
+    const pricePerNight = Number(selectedRoomType.basePrice) + Number(selectedPackage.extraPricePerNight);
+    return pricePerNight * nights;
+  };
 
   const handleBooking = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedRoom) return;
+    if (!selectedRoomType || !selectedPackage) return;
+
+    setLoading(true);
+    setError(null);
+
+    const payload = {
+      roomTypeId: selectedRoomType.id,
+      packageId: selectedPackage.id,
+      firstName,
+      lastName,
+      guestEmail: email,
+      phoneNumber,
+      checkInDate,
+      checkOutDate,
+    };
 
     try {
-      const res = await fetch('http://localhost:8080/api/reservations', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          roomId: selectedRoom.id,
-          ...formData,
-        }),
+      const res = await fetch(`${API_BASE}/reservations`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
       });
 
-      if (res.ok) {
-        setMessage({ text: 'Rezervacija uspješno kreirana!', isError: false });
-        setSelectedRoom(null);
-        setFormData({
-          firstName: '',
-          lastName: '',
-          email: '',
-          phoneNumber: '',
-          checkInDate: '',
-          checkOutDate: '',
-        });
-      } else {
-        const errorText = await res.text();
-        setMessage({ text: errorText || 'Greška pri rezervaciji (provjeri datume ili zauzetost).', isError: true });
+      if (!res.ok) {
+        const errData = await res.text();
+        throw new Error(errData || "Greška pri kreiranju rezervacije.");
       }
-    } catch {
-      setMessage({ text: 'Neuspješno slanje zahtjeva na server.', isError: true });
+
+      setBookingSuccess(true);
+      setSelectedRoomType(null);
+      setSelectedPackage(null);
+      setFirstName("");
+      setLastName("");
+      setEmail("");
+      setPhoneNumber("");
+    } catch (err: any) {
+      setError(err.message || "Neuspješna rezervacija.");
+    } finally {
+      setLoading(false);
     }
   };
 
   return (
-    <main className="min-h-screen bg-slate-50 p-8 text-slate-800">
+    <main className="min-h-screen bg-slate-50 p-6 text-slate-800">
       <div className="max-w-5xl mx-auto">
-        <header className="mb-8 border-b pb-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <header className="flex justify-between items-center mb-8 border-b pb-4">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight text-slate-900">Hotel Management & Booking</h1>
-            <p className="text-sm text-slate-500">Sustav za rezervacije soba</p>
+            <h1 className="text-3xl font-bold text-slate-900">Hotel Management & Booking</h1>
+            <p className="text-sm text-slate-500">Sistem rezervacije po uzoru na PMS Opera</p>
           </div>
           <Link
             href="/dashboard"
-            className="bg-slate-900 hover:bg-slate-800 text-white text-sm font-semibold px-4 py-2.5 rounded-lg transition"
+            className="bg-slate-900 text-white px-4 py-2 rounded-lg font-medium hover:bg-slate-800 transition"
           >
-            Recepcijski Dashboard →
+            Recepcijski Dashboard
           </Link>
         </header>
 
-        {message && (
-          <div
-            className={`p-4 mb-6 rounded-md font-medium ${
-              message.isError ? 'bg-red-100 text-red-700 border border-red-300' : 'bg-emerald-100 text-emerald-700 border border-emerald-300'
-            }`}
-          >
-            {message.text}
+        {/* 1. Forma za pretragu po datumima */}
+        <section className="bg-white p-6 rounded-xl shadow-sm border mb-8">
+          <h2 className="text-xl font-semibold mb-4 text-slate-900">Pretraga slobodnog smještaja</h2>
+          <form onSubmit={handleSearch} className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Datum dolaska</label>
+              <input
+                type="date"
+                value={checkInDate}
+                onChange={(e) => setCheckInDate(e.target.value)}
+                className="w-full border rounded-lg p-2.5 outline-none focus:ring-2 focus:ring-slate-900"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Datum odlaska</label>
+              <input
+                type="date"
+                value={checkOutDate}
+                onChange={(e) => setCheckOutDate(e.target.value)}
+                className="w-full border rounded-lg p-2.5 outline-none focus:ring-2 focus:ring-slate-900"
+                required
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={loading}
+              className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2.5 px-4 rounded-lg transition disabled:opacity-50"
+            >
+              {loading ? "Pretraživanje..." : "Pretraži slobodne sobe"}
+            </button>
+          </form>
+          {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+          {bookingSuccess && (
+            <div className="mt-4 p-4 bg-green-50 text-green-700 rounded-lg border border-green-200">
+              Uspješno ste kreirali rezervaciju! Fizički broj sobe biće dodijeljen na recepciji pri dolasku.
+            </div>
+          )}
+        </section>
+
+        {/* 2. Prikaz dostupnih tipova soba i paketa */}
+        {availability && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div className="lg:col-span-2 space-y-4">
+              <h2 className="text-xl font-semibold text-slate-900">
+                Dostupne vrste soba ({availability.availableRoomTypes.length})
+              </h2>
+
+              {availability.availableRoomTypes.length === 0 ? (
+                <div className="bg-white p-6 rounded-xl border text-slate-500">
+                  Nema slobodnih soba za odabrane datume. Pokušajte drugi termin.
+                </div>
+              ) : (
+                availability.availableRoomTypes.map((rt) => (
+                  <div
+                    key={rt.id}
+                    className={`bg-white p-5 rounded-xl border transition cursor-pointer ${
+                      selectedRoomType?.id === rt.id
+                        ? "border-blue-600 ring-2 ring-blue-600 shadow-sm"
+                        : "hover:border-slate-300"
+                    }`}
+                    onClick={() => setSelectedRoomType(rt)}
+                  >
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <h3 className="text-lg font-bold text-slate-900">{rt.name}</h3>
+                        <p className="text-sm text-slate-500">Maksimalan kapacitet: {rt.capacity} osobe</p>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-xl font-bold text-slate-900">{rt.basePrice} €</span>
+                        <span className="text-xs text-slate-500 block">/ noć (osnovna)</span>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+
+              {/* Odabir paketa */}
+              {selectedRoomType && (
+                <div className="mt-6 bg-white p-5 rounded-xl border">
+                  <h3 className="font-semibold text-slate-900 mb-3">Odaberite paket / uslugu:</h3>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {availability.availablePackages.map((pkg) => (
+                      <div
+                        key={pkg.id}
+                        onClick={() => setSelectedPackage(pkg)}
+                        className={`p-3 border rounded-lg cursor-pointer transition ${
+                          selectedPackage?.id === pkg.id
+                            ? "border-blue-600 bg-blue-50"
+                            : "hover:bg-slate-50"
+                        }`}
+                      >
+                        <div className="font-medium text-slate-800">{pkg.name}</div>
+                        <div className="text-sm text-slate-500">
+                          {pkg.extraPricePerNight > 0
+                            ? `+${pkg.extraPricePerNight} € / noć`
+                            : "Uključeno u osnovnu cijenu"}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 3. Forma za potvrdu rezervacije */}
+            <div>
+              <div className="bg-white p-6 rounded-xl border shadow-sm sticky top-6">
+                <h2 className="text-lg font-bold text-slate-900 mb-4">Podaci za rezervaciju</h2>
+
+                {selectedRoomType && selectedPackage ? (
+                  <form onSubmit={handleBooking} className="space-y-3">
+                    <div className="p-3 bg-slate-50 rounded-lg text-sm space-y-1 mb-4">
+                      <div><span className="font-medium">Soba:</span> {selectedRoomType.name}</div>
+                      <div><span className="font-medium">Paket:</span> {selectedPackage.name}</div>
+                      <div className="pt-2 border-t mt-2 flex justify-between font-bold text-base text-slate-900">
+                        <span>Ukupna cijena:</span>
+                        <span>{calculateTotal()} €</span>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">Ime</label>
+                      <input
+                        type="text"
+                        value={firstName}
+                        onChange={(e) => setFirstName(e.target.value)}
+                        required
+                        className="w-full border rounded-lg p-2 text-sm outline-none focus:ring-1 focus:ring-slate-900"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">Prezime</label>
+                      <input
+                        type="text"
+                        value={lastName}
+                        onChange={(e) => setLastName(e.target.value)}
+                        required
+                        className="w-full border rounded-lg p-2 text-sm outline-none focus:ring-1 focus:ring-slate-900"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">Email</label>
+                      <input
+                        type="email"
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                        required
+                        className="w-full border rounded-lg p-2 text-sm outline-none focus:ring-1 focus:ring-slate-900"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">Broj telefona</label>
+                      <input
+                        type="tel"
+                        value={phoneNumber}
+                        onChange={(e) => setPhoneNumber(e.target.value)}
+                        className="w-full border rounded-lg p-2 text-sm outline-none focus:ring-1 focus:ring-slate-900"
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={loading}
+                      className="w-full mt-4 bg-slate-900 hover:bg-slate-800 text-white font-medium py-2.5 rounded-lg transition text-sm disabled:opacity-50"
+                    >
+                      {loading ? "Spremanje..." : "Potvrdi rezervaciju"}
+                    </button>
+                  </form>
+                ) : (
+                  <p className="text-sm text-slate-500">
+                    Pretražite termine i kliknite na željenu sobu kako biste unijeli podatke.
+                  </p>
+                )}
+              </div>
+            </div>
           </div>
         )}
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-          {/* Popis Soba */}
-          <section className="md:col-span-2">
-            <h2 className="text-xl font-semibold mb-4 text-slate-900">Dostupne sobe</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {rooms.map((room) => (
-                <div
-                  key={room.id}
-                  className={`p-5 rounded-lg border bg-white shadow-sm transition hover:shadow-md ${
-                    selectedRoom?.id === room.id ? 'ring-2 ring-blue-600 border-blue-600' : 'border-slate-200'
-                  }`}
-                >
-                  <div className="flex justify-between items-start mb-2">
-                    <span className="text-lg font-bold text-slate-900">Soba {room.roomNumber}</span>
-                    <span className="text-xs font-semibold px-2.5 py-0.5 rounded bg-slate-100 text-slate-700">
-                      {room.type}
-                    </span>
-                  </div>
-                  <p className="text-2xl font-black text-slate-900 mb-4">
-                    {room.pricePerNight} <span className="text-sm font-normal text-slate-500">€ / noć</span>
-                  </p>
-                  <button
-                    onClick={() => setSelectedRoom(room)}
-                    className={`w-full py-2 px-4 rounded font-medium text-sm transition ${
-                      selectedRoom?.id === room.id
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-slate-100 text-slate-800 hover:bg-slate-200'
-                    }`}
-                  >
-                    {selectedRoom?.id === room.id ? 'Odabrana' : 'Odaberi za rezervaciju'}
-                  </button>
-                </div>
-              ))}
-            </div>
-          </section>
-
-          {/* Forma za Rezervaciju */}
-          <section className="bg-white p-6 rounded-lg border border-slate-200 shadow-sm h-fit">
-            <h2 className="text-xl font-semibold mb-4 text-slate-900">Nova rezervacija</h2>
-            {selectedRoom ? (
-              <form onSubmit={handleBooking} className="space-y-4">
-                <div className="p-3 bg-blue-50 border border-blue-100 rounded text-sm text-blue-800">
-                  Rezervirate: <strong>Soba {selectedRoom.roomNumber}</strong> ({selectedRoom.type})
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold uppercase text-slate-500 mb-1">Ime</label>
-                  <input
-                    required
-                    type="text"
-                    value={formData.firstName}
-                    onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
-                    className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold uppercase text-slate-500 mb-1">Prezime</label>
-                  <input
-                    required
-                    type="text"
-                    value={formData.lastName}
-                    onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}
-                    className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold uppercase text-slate-500 mb-1">Email</label>
-                  <input
-                    required
-                    type="email"
-                    value={formData.email}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold uppercase text-slate-500 mb-1">Broj telefona</label>
-                  <input
-                    type="tel"
-                    value={formData.phoneNumber}
-                    onChange={(e) => setFormData({ ...formData, phoneNumber: e.target.value })}
-                    className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="block text-xs font-semibold uppercase text-slate-500 mb-1">Prijava</label>
-                    <input
-                      required
-                      type="date"
-                      min={todayStr || undefined}
-                      value={formData.checkInDate}
-                      onChange={(e) => {
-                        const newCheckIn = e.target.value;
-                        setFormData((prev) => ({
-                          ...prev,
-                          checkInDate: newCheckIn,
-                          checkOutDate: prev.checkOutDate && prev.checkOutDate <= newCheckIn ? '' : prev.checkOutDate,
-                        }));
-                      }}
-                      className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-semibold uppercase text-slate-500 mb-1">Odjava</label>
-                    <input
-                      required
-                      type="date"
-                      min={formData.checkInDate || todayStr || undefined}
-                      value={formData.checkOutDate}
-                      onChange={(e) => setFormData({ ...formData, checkOutDate: e.target.value })}
-                      className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  className="w-full bg-blue-600 text-white font-medium py-2.5 rounded shadow hover:bg-blue-700 transition"
-                >
-                  Potvrdi rezervaciju
-                </button>
-              </form>
-            ) : (
-              <p className="text-sm text-slate-500">Odaberite sobu s popisa s lijeve strane za unos podataka.</p>
-            )}
-          </section>
-        </div>
       </div>
     </main>
   );
