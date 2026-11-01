@@ -7,6 +7,11 @@ import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+
+import java.util.List;
 
 @Configuration
 @EnableWebSecurity
@@ -16,23 +21,34 @@ public class SecurityConfig {
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
             .csrf(csrf -> csrf.disable())
-            .cors(Customizer.withDefaults())
+            .cors(cors -> cors.configurationSource(corsConfigurationSource()))
             .authorizeHttpRequests(auth -> auth
-                // 1. Javne rute za goste (bez prijave)
                 .requestMatchers(HttpMethod.GET, "/api/reservations/availability").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/reservations").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/rooms").permitAll()
                 .requestMatchers("/api/reservations/**").permitAll()
-                
-                // 2. Admin rute (zahtijevaju prijavu)
                 .requestMatchers("/api/admin/**").authenticated()
-                
-                // Sve ostalo dopušteno
                 .anyRequest().permitAll()
             )
-            // Google OAuth2 prijava
             .oauth2Login(Customizer.withDefaults());
 
         return http.build();
+    }
+
+    @Bean
+    public CorsConfigurationSource corsConfigurationSource() {
+        CorsConfiguration config = new CorsConfiguration();
+        // Ovdje je tvoj Vercel URL + localhost za lokalni test
+        config.setAllowedOrigins(List.of(
+            "https://hotel-sistem-chi.vercel.app",
+            "http://localhost:3000"
+        ));
+        config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+        config.setAllowedHeaders(List.of("*"));
+        config.setAllowCredentials(true);
+
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", config);
+        return source;
     }
 }
